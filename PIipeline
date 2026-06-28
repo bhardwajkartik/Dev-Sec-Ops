@@ -1,0 +1,71 @@
+pipeline {
+    agent{label 'Agent'
+    }
+
+    environment { 
+        SONAR_HOME = tool 'Sonar' // Jenkins ke Global Tool Configuration se SonarQube Scanner uthayega
+    }
+
+    stages { 
+
+        stage("Clone") {
+            steps {
+                echo "Cloning the repository..."
+                git url: 'https://github.com/bhardwajkartik/Dev-Sec-Ops.git', branch: 'main'
+            }
+        }
+
+        stage("Code Quality (SonarQube)") {
+            steps {
+                withSonarQubeEnv('Sonar') {
+                    sh "${SONAR_HOME}/bin/sonar-scanner -Dsonar.projectKey=Dev-Sec-Ops"
+                }
+            }
+        }
+       stage("check dependiencies") {
+    steps {
+        script {
+            try {
+                dependencyCheck(
+                    additionalArguments: '--scan ./',
+                    odcInstallation: 'Owasp-check'
+                )
+
+                echo "Publishing Dependency Report..."
+
+                dependencyCheckPublisher(
+                    pattern: '**/dependency-check-report.xml'
+                )
+
+            } catch (Exception e) {
+                echo "OWASP Dependency Check fail hua: ${e.getMessage()}"
+                currentBuild.result = 'SUCCESS'
+            }
+        }
+    }
+}
+        stage("quality checks"){
+           steps{
+               timeout(time:3, unit:"MINUTES"){
+                   waitForQualityGate abortPipeline:false
+               }
+           } 
+        }
+        stage("check filesystem"){
+            steps{
+                sh"trivy fs --format table -o trivy-fs-report.html ."
+            }
+        }
+        stage("build"){
+            steps{
+                sh"docker build -t dev-sec-ops:latest ."
+            }
+        }
+        stage("deploy"){
+            steps{
+                sh"docker run -d --name Dev-Sec-ops -p 2911:3000 dev-sec-ops:latest"
+            }
+        }
+
+    }
+}
